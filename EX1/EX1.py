@@ -2,11 +2,13 @@
 # task on the SST2 dataset.
 from collections import defaultdict
 
+import numpy as np
 from datasets import load_dataset
 from transformers import AutoConfig, AutoTokenizer, AutoModel, Trainer, set_seed, \
-    DataCollatorWithPadding, TrainingArguments
+    DataCollatorWithPadding, TrainingArguments, EvalPrediction
 import transformers
 from transformers import AutoModelForSequenceClassification
+from evaluate import load #TODO correct evaluate??
 
 
 
@@ -28,11 +30,11 @@ class FineTuner:
     """
     initializes the class
     """
-    def __init__(self, seed, model_name, dataset):
-
+    def __init__(self, seed, model_name, dataset, eval_metric):
         set_seed(seed) # set seed to chosen seed
         self.model_name = model_name
         self.dataset_name = dataset
+        self.eval_metric = load("bleu")
 
     def run(self):
         raw_dataset = load_dataset(self.dataset_name, cache_dir=None) #TODO need more params? ca
@@ -63,7 +65,8 @@ class FineTuner:
     loads training_arguments param for trainer
     """
     def __load_training_arguments(self):
-        training_args = TrainingArguments(num_train_epochs=1) #TODO args?
+        training_args = TrainingArguments(num_train_epochs=1, output_dir="../PycharmProjects/ANLP") #TODO args?
+        return training_args
     """
     loads configurations
     
@@ -98,8 +101,13 @@ class FineTuner:
     """
     method that trainer will recieve ref to ??#TODO
     """
-    def compute_metrics(self):
-        pass
+    def compute_metrics(self, p:EvalPrediction):
+        if not self.eval_metric:
+            raise Exception("evaluation metric must be defined")
+        preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
+        preds = np.argmax(preds, axis=1)
+        result = self.eval_metric.compute(predictions=preds, references=p.label_ids)["bleu"] #TODO bleu?
+        return result
 
     def eval_metrics(self):
         pass
