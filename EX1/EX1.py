@@ -34,32 +34,28 @@ class FineTuner:
         set_seed(seed) # set seed to chosen seed
         self.model_name = model_name
         self.dataset_name = dataset
-        self.eval_metric = load("bleu")
+        self.eval_metric = load("accuracy")
+        self.config = self.load_configs(model_name=self.model_name)
+        self.tokenizer = self.load_tokenizer(model_name=self.model_name)
+        self.model = self.load_model(model_name=self.model_name)
 
     def run(self):
-        raw_dataset = load_dataset(self.dataset_name, cache_dir=None) #TODO need more params? ca
-        train_split = raw_dataset["train"]
-        eval_split = raw_dataset["validation"]
-        config, tokenizer, model = self.load_configs(model_name=self.model_name), self.load_model(model_name=self.model_name), \
-                                   self.load_tokenizer(model_name=self.model_name)
+        raw_datasets = load_dataset(self.dataset_name, cache_dir=None) #TODO need more params? ca
 
-        data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8) #TODO args?
+        # map data via preprocess function
+        raw_datasets = raw_datasets.map(self.preproccess_function, batched=True) #todo add description?
+        train_split, eval_split = raw_datasets["train"], raw_datasets["validation"]
+
+        data_collator = DataCollatorWithPadding(self.tokenizer, padding="longest") #TODO args?
+
         training_args = self.__load_training_arguments()
-        trainer, train_res = self.__train(model, training_args, train_split, eval_split,
-                                                        self.compute_metrics, tokenizer, data_collator)
+        trainer, train_res = self.__train(self.model, training_args, train_split, eval_split,
+                                                        self.compute_metrics, self.tokenizer, data_collator)
         metrics = trainer.evaluate(eval_split)
 
         # return something
         return trainer, metrics
 
-
-
-    """
-    #TODO
-    """
-    def __apply_data_collator(self, dataset):
-        loader = DataCollatorWithPadding(dataset) #TOD0 set args?
-        return loader
 
     """
     loads training_arguments param for trainer
@@ -79,7 +75,7 @@ class FineTuner:
     @:param model_name name of model to load
     """
     def load_model(self, model_name):
-        return AutoModelForSequenceClassification.from_pretrained(model_name) #TODO other args?
+        return AutoModelForSequenceClassification.from_pretrained(model_name, self.config) #TODO other args?
 
     """
     loads tokenizer
@@ -89,12 +85,16 @@ class FineTuner:
         return AutoTokenizer.from_pretrained(model_name) #TODO other args?
     """
     preprocessing function that receives a tokenizer and the data to tokenize and return ???
+    truncates sequence length to maximum avaliable for model via max_length=None
+    does not pad (dynamic padding)
     @:param tokenizer #TODO
     @:param data unprocessed data to tokenize
     @:return res ???
     """
-    def preproccess_function(self, tokenizer, data):
-        res = tokenizer(data['???'], max_length=512, truncation=True) #TODO check params
+    def preproccess_function(self, data):
+        if not self.tokenizer:
+            raise Exception("need to define tokenizer")
+        res = self.tokenizer(data['input'], max_length=None, truncation=True) #TODO check params
         return res
 
 
@@ -106,7 +106,7 @@ class FineTuner:
             raise Exception("evaluation metric must be defined")
         preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
         preds = np.argmax(preds, axis=1)
-        result = self.eval_metric.compute(predictions=preds, references=p.label_ids)["bleu"] #TODO bleu?
+        result = self.eval_metric.compute(predictions=preds, references=p.label_ids)["accuracy"] #TODO bleu?
         return result
 
     def eval_metrics(self):
@@ -116,8 +116,7 @@ class FineTuner:
         trainer = self.load_trainer(model=model, training_args=training_args,
                                     train_dataset=train_split, eval_dataset=eval_split,
                                     compute_metrics=metric,
-                                    tokenizer=tokenizer, data_collator=data_collator
-                                    )
+                                    tokenizer=tokenizer, data_collator=data_collator)
         train_res = trainer.train()
         return trainer, train_res
 
@@ -140,6 +139,28 @@ class FineTuner:
     def evaluate(self, trainer: Trainer, eval_dataset):
         metrics = trainer.evaluate(eval_dataset=eval_dataset)
         return metrics
+"""
+write mean and standard deviation of each model across seeds
+"""
+def write_mean_and_std(trainers:dict):
+    with open("res.txt") as f:
+        for model in trainers.keys():
+            f.write(f"{model},{mean_accuracy(trainers[model])}+-{std_accuracy(trainers[model])}")
+
+def mean_accuracy(trainer_by_seed:list):
+    accuracies = [trainer.accuracy() for trainer in trainer_by_seed]  # TODO how to get accuracy
+    return np.mean(accuracies), np.std(accuracies)
+
+def std_accuracy(trainer_by_seed:list):
+    accuracies = [trainer.accuracy() for trainer in trainer_by_seed]  # TODO how to get accuracy
+    return np.std(accuracies)
+
+
+def get_best_trainer(trainers):
+    # get best trainer
+    best_trainer = max(trainers.keys, key=lambda k: mean_accuracy(trainers[k]))
+    best_
+
 
 
 def main(model_names, seeds, dataset):
@@ -148,9 +169,11 @@ def main(model_names, seeds, dataset):
         for seed in seeds:
             finetuner = FineTuner(model_name=model, dataset=dataset, seed=seed)
             trainer, metrics = finetuner.run()
+            trainers[model][seed] = [trainer, metrics]
 
 
 if __name__ == '__main__':
+    # cleanout files
     # models we want to finetune on
     model_names = ["bert-base-uncased", "roberta-base", "google/electra-base-generator"]
     seeds = [1]
