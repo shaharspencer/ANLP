@@ -1,14 +1,20 @@
 # In this exercise you will be asked to fine-tune pretrained large language models to perform the sentiment analysis
 # task on the SST2 dataset.
-from collections import defaultdict
 
+from collections import defaultdict
+from docopt import docopt
 import numpy as np
 from datasets import load_dataset, load_metric
 from transformers import AutoConfig, AutoTokenizer, AutoModel, Trainer, \
     set_seed, \
     DataCollatorWithPadding, TrainingArguments, EvalPrediction
 from transformers import AutoModelForSequenceClassification
-import transformers
+
+usage = '''
+EX1.py CLI.
+Usage:
+    EX1.py <num_seeds> <training_samples> <val_samples> <pred_samples>
+'''
 
 
 # Write Python code for fine-tuning the following three pretrained language models to perform sentiment
@@ -24,13 +30,21 @@ import transformers
 # 7. Evaluate (and maybe predict)
 
 # Use the AutoModelForSequenceClassification class to load your models.
+# TODO During prediction, unlike during training, you should not pad the samples at all.???
+#TODO rename ex1.py
+#TODO calculate time for stuff
+#todo wandb
 
 class FineTuner:
     """
     initializes the class
     """
 
-    def __init__(self, seed, model_name, dataset):
+    def __init__(self, seed, model_name, dataset, train_samples, val_samples,
+                 test_samples):
+        self.test_samples = test_samples
+        self.val_samples = val_samples
+        self.train_samples = train_samples
         self.seed = seed
         set_seed(seed)  # set seed to chosen seed
         self.model_name = model_name
@@ -46,16 +60,11 @@ class FineTuner:
         self.tokenizer = self.__load_tokenizer(model_name=self.model_name)
         raw_dataset = load_dataset(self.dataset_name,
                                    cache_dir=None)  # TODO need more params? ca
-        raw_dataset = raw_dataset.map(self.preproccess_function,
+        self.raw_dataset = raw_dataset.map(self.preproccess_function,
                                       batched=True,
                                       desc="running tokenizer on dataset", )  # map data to tok
+        self.process_datasets()
 
-        self.train_split = raw_dataset["train"].select(
-            range(20))  # TODO remove select
-
-        self.eval_split = raw_dataset["validation"].select(
-            range(3))  # TODO remove select
-        self.test_split = raw_dataset["test"].select(range(3))
 
         self.label_list = self.get_labels()
         self.config = self.__load_configs(model_name=self.model_name)
@@ -85,6 +94,22 @@ class FineTuner:
     def get_seed(self):
         return self.seed
 
+    def process_datasets(self):
+        if self.train_samples != -1:
+            self.train_split = self.raw_dataset["train"].select(range(self.train_samples))  # TODO remove select
+        else:
+            self.train_split = self.raw_dataset["train"]
+
+        if self.val_samples != -1:
+            self.eval_split = self.raw_dataset["val"].select(range(self.val_samples))
+        else:
+            self.eval_split = self.raw_dataset["val"]
+
+        if self.test_samples != -1:
+            self.test_split = self.raw_dataset["test"].select(range(self.test_samples))
+        else:
+            self.test_split = self.raw_dataset["test"]
+
 
 
     def define_labels(self):
@@ -96,7 +121,7 @@ class FineTuner:
     """
 
     def __load_training_arguments(self):
-        training_args = TrainingArguments(num_train_epochs=0.00000001,per_device_train_batch_size=1,per_device_eval_batch_size=1,
+        training_args = TrainingArguments(save_total_limit=1,
                                           output_dir="../PycharmProjects/ANLP")  # TODO args need to change to default
         return training_args
 
@@ -216,13 +241,15 @@ class FineTuner:
     this method returns predictions of the trained model on the test set. 
     """
 
-    def predict(self):
+    def predict(self, file):
+        self.model.eval() #TODO should be self.trainer.eval()???
         predict_dataset = self.test_split.remove_columns("label")
-        preds = self.trainer.predict(predict_dataset,
-                                      metric_key_prefix="predict").predictions
-        preds = np.argmax(preds,axis=1)
-        print(preds)
-        return preds
+        with open(file, mode="w") as f:
+            for i in range(len(predict_dataset)):
+                sent = self.test_split["sentence"][i]
+                pred = self.trainer.predict(predict_dataset.select(range(i, i+1)),
+                                          metric_key_prefix="predict").predictions
+                f.write(f"{sent}###{pred}")
 
 
 def mean_accuracy_on_seeds(trained_models_by_seed):
@@ -271,12 +298,13 @@ def predict_best_model(trainer_dict):
 
 
 
-def main(model_names, seeds, dataset):
+def main(model_names, seeds, dataset, train_samples, val_samples, test_samples):
     trainers = defaultdict(list)
     for model in model_names:
         for seed in seeds:
             finetuner = FineTuner(model_name=model, dataset=dataset,
-                                  seed=seed)
+                                  seed=seed, train_samples=train_samples,
+                                  val_samples=val_samples, test_samples=test_samples)
             finetuner.run()
             trainers[model].append(finetuner)
 
@@ -288,5 +316,10 @@ if __name__ == '__main__':
     # models we want to finetune on
     model_names = ["bert-base-uncased", "roberta-base",
                    "google/electra-base-generator"]
-    seeds = [1]
-    main(model_names, seeds, "sst2")
+    args = docopt(usage)
+
+    seeds = range(int(args["<num_seeds"]))
+    train_samples = int(args["<training_samples>"])
+    val_samples = int(args["<val_samples>"])
+    pred_samples = int(args["<pred_samples>"])
+    main(model_names, seeds, "sst2", train_samples, val_samples, pred_samples)
