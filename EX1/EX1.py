@@ -8,6 +8,7 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel, Trainer, \
     set_seed, \
     DataCollatorWithPadding, TrainingArguments, EvalPrediction
 from transformers import AutoModelForSequenceClassification
+import transformers
 
 
 # Write Python code for fine-tuning the following three pretrained language models to perform sentiment
@@ -36,24 +37,38 @@ class FineTuner:
         self.dataset_name = dataset
         self.eval_metric = load_metric("accuracy")  # TODO which metric?
 
+    def get_labels(self):
+        labels = self.train_split.features["label"].names
+        self.label_to_id = {v: i for i, v in enumerate(labels)}
+        return labels
+
     def run(self):
-        self.config = self.__load_configs(model_name=self.model_name)
         self.tokenizer = self.__load_tokenizer(model_name=self.model_name)
-        self.model = self.__load_model(model_name=self.model_name,
-                                       config=self.config)
         raw_dataset = load_dataset(self.dataset_name,
                                    cache_dir=None)  # TODO need more params? ca
         raw_dataset = raw_dataset.map(self.preproccess_function,
-                                      batched=True)  # map data to tok
-        self.train_split = raw_dataset["train"]
+                                      batched=True,
+                                      desc="running tokenizer on dataset", )  # map data to tok
 
-        self.eval_split = raw_dataset["validation"]
-        self.test_split = raw_dataset["test"]
+        self.train_split = raw_dataset["train"].select(
+            range(20))  # TODO remove select
+
+        self.eval_split = raw_dataset["validation"].select(
+            range(3))  # TODO remove select
+        self.test_split = raw_dataset["test"].select(range(3))
+
+        self.label_list = self.get_labels()
+        self.config = self.__load_configs(model_name=self.model_name)
+
+        self.model = self.__load_model(model_name=self.model_name,
+                                       config=self.config)
+
+        self.define_labels()
 
         data_collator = DataCollatorWithPadding(self.tokenizer,
                                                 padding="longest")  # TODO args?
         training_args = self.__load_training_arguments()
-        self.trainer, train_res = self.__train(self.model, training_args,
+        self.trainer, self.metric = self.__train(self.model, training_args,
                                                self.train_split,
                                                self.eval_split,
                                                self.compute_metrics,
@@ -70,6 +85,12 @@ class FineTuner:
     def get_seed(self):
         return self.seed
 
+
+
+    def define_labels(self):
+
+        self.model.config.label2id = {v: i for i, v in enumerate(self.label_list)}
+        self.model.config.id2label = {id: label for label, id in self.config.label2id.items()} #IS THIS CORRECT?
     """
     loads training_arguments param for trainer
     """
@@ -85,7 +106,13 @@ class FineTuner:
     """
 
     def __load_configs(self, model_name):
-        configs = AutoConfig.from_pretrained(model_name)
+        if not self.label_list:
+            raise Exception("label list must be defined")
+        configs = AutoConfig.from_pretrained(pretrained_model_name_or_path=model_name,
+                                             num_labels = len(self.label_list),
+                                            )#????
+        #
+        #TODO: need to define number of labels?
         return configs
 
     """
@@ -117,8 +144,13 @@ class FineTuner:
     def preproccess_function(self, data):
         if not self.tokenizer:
             raise Exception("need to define tokenizer")
-        res = self.tokenizer(data['sentence'], max_length=512,
+        res = self.tokenizer(data['sentence'], max_length=self.tokenizer.model_max_length,
                              truncation=True)  # TODO check params
+
+        # if "label" in data: #TODO need to do this? idk
+        #     res["label"] = [(self.label_to_id[l] if l != -1 else -1) for l in
+        #                        data["label"]]
+
         return res
 
     """
@@ -148,13 +180,13 @@ class FineTuner:
                 tokenizer, data_collator):
         trainer = self.__load_trainer(model=model, training_args=training_args,
                                       train_dataset=train_split,
-                                      eval_dataset=eval_split,
+                                      eval_dataset=train_split,
                                       compute_metrics=metric,
                                       tokenizer=tokenizer,
                                       data_collator=data_collator
                                       )
-        train_res = trainer.train()
-        return trainer, train_res
+        res = trainer.train()
+        return trainer, res
 
     """
     loads instance of Trainer class with params
@@ -185,8 +217,10 @@ class FineTuner:
     """
 
     def predict(self):
-        preds = self.trainer.predict(
-            test_dataset=self.test_split).predictions
+        predict_dataset = self.test_split.remove_columns("label")
+        preds = self.trainer.predict(predict_dataset,
+                                      metric_key_prefix="predict").predictions
+        preds = np.argmax(preds,axis=1)
         print(preds)
         return preds
 
@@ -246,7 +280,7 @@ def main(model_names, seeds, dataset):
             finetuner.run()
             trainers[model].append(finetuner)
 
-        write_res_file(trainer_dict=trainers)
+        write_res_file(trainer_dict=trainers) #TODO move forward
         predict_best_model(trainers)
 
 
