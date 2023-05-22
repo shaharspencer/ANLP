@@ -2,3 +2,4 @@ datasets
 transformers
 numpy
 wandb
+docopt

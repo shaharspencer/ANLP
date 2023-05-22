@@ -2,6 +2,8 @@
 # task on the SST2 dataset.
 
 from collections import defaultdict
+
+# import wandb
 from docopt import docopt
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -9,11 +11,13 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel, Trainer, \
     set_seed, \
     DataCollatorWithPadding, TrainingArguments, EvalPrediction
 from transformers import AutoModelForSequenceClassification
+# from transformers.integrations import WandbCallback
+# wandb.login(key="fbf0cfa343de1b7e8108fcab5c9fae9d72def7ea")
 
 usage = '''
-EX1.py CLI.
+ex1.py CLI.
 Usage:
-    EX1.py <num_seeds> <training_samples> <val_samples> <pred_samples>
+    ex1.py <num_seeds> <training_samples> <val_samples> <pred_samples>
 '''
 
 
@@ -30,10 +34,7 @@ Usage:
 # 7. Evaluate (and maybe predict)
 
 # Use the AutoModelForSequenceClassification class to load your models.
-# TODO During prediction, unlike during training, you should not pad the samples at all.???
-#TODO rename ex1.py
-#TODO calculate time for stuff
-#todo wandb
+
 
 class FineTuner:
     """
@@ -49,7 +50,15 @@ class FineTuner:
         set_seed(seed)  # set seed to chosen seed
         self.model_name = model_name
         self.dataset_name = dataset
-        self.eval_metric = load_metric("accuracy")  # TODO which metric?
+        self.eval_metric = load_metric("accuracy")
+        # splitted_for_wandb = model_name.split(r'/')
+        # if len(splitted_for_wandb)> 1:
+        #     splitted_for_wandb = splitted_for_wandb[1]
+        # else:
+        #     splitted_for_wandb = splitted_for_wandb[0]
+        # if self.seed == 0:
+        #     wandb.init(project=f"ANLP ex1 {splitted_for_wandb},
+        #     seed {str(seed)}", entity='shahar-spencer')
 
     def get_labels(self):
         labels = self.train_split.features["label"].names
@@ -59,10 +68,10 @@ class FineTuner:
     def run(self):
         self.tokenizer = self.__load_tokenizer(model_name=self.model_name)
         raw_dataset = load_dataset(self.dataset_name,
-                                   cache_dir=None)  # TODO need more params? ca
+                                   cache_dir=None)
         self.raw_dataset = raw_dataset.map(self.preproccess_function,
                                       batched=True,
-                                      desc="running tokenizer on dataset", )  # map data to tok
+                                      desc="running tokenizer on dataset", )
         self.process_datasets()
 
 
@@ -75,7 +84,7 @@ class FineTuner:
         self.define_labels()
 
         data_collator = DataCollatorWithPadding(self.tokenizer,
-                                                padding="longest")  # TODO args?
+                                                padding="longest")
         training_args = self.__load_training_arguments()
         self.trainer, self.metric = self.__train(self.model, training_args,
                                                self.train_split,
@@ -83,6 +92,16 @@ class FineTuner:
                                                self.compute_metrics,
                                                self.tokenizer, data_collator)
         self.metrics = self.trainer.evaluate(self.eval_split)
+
+        # if self.seed == 0:
+        #     self.trainer.log_metrics = lambda *args, **kwargs: wandb.log(*args,
+        #                                                             **kwargs)
+        #     wandb.finish()
+        #
+    def get_train_time(self):
+        return self.metric.metrics["train_runtime"]
+
+
     def get_test(self):
         return self.test_split
     def get_trainer(self):
@@ -96,17 +115,20 @@ class FineTuner:
 
     def process_datasets(self):
         if self.train_samples != -1:
-            self.train_split = self.raw_dataset["train"].select(range(self.train_samples))  # TODO remove select
+            self.train_split = self.raw_dataset["train"].select(
+                range(self.train_samples))
         else:
             self.train_split = self.raw_dataset["train"]
 
         if self.val_samples != -1:
-            self.eval_split = self.raw_dataset["val"].select(range(self.val_samples))
+            self.eval_split = self.raw_dataset["validation"].select(
+                range(self.val_samples))
         else:
-            self.eval_split = self.raw_dataset["val"]
+            self.eval_split = self.raw_dataset["validation"]
 
         if self.test_samples != -1:
-            self.test_split = self.raw_dataset["test"].select(range(self.test_samples))
+            self.test_split = self.raw_dataset["test"].select(
+                range(self.test_samples))
         else:
             self.test_split = self.raw_dataset["test"]
 
@@ -114,15 +136,17 @@ class FineTuner:
 
     def define_labels(self):
 
-        self.model.config.label2id = {v: i for i, v in enumerate(self.label_list)}
-        self.model.config.id2label = {id: label for label, id in self.config.label2id.items()} #IS THIS CORRECT?
+        self.model.config.label2id = {v: i for i, v in enumerate(
+            self.label_list)}
+        self.model.config.id2label = {id: label for label, id in
+                                      self.config.label2id.items()}
     """
     loads training_arguments param for trainer
     """
 
     def __load_training_arguments(self):
         training_args = TrainingArguments(save_total_limit=1,
-                                          output_dir="../PycharmProjects/ANLP")  # TODO args need to change to default
+                                          output_dir="../ANLP")
         return training_args
 
     """
@@ -157,49 +181,34 @@ class FineTuner:
     """
 
     def __load_tokenizer(self, model_name):
-        return AutoTokenizer.from_pretrained(model_name)  # TODO other args?
+        return AutoTokenizer.from_pretrained(model_name)
 
     """
-    preprocessing function that receives a tokenizer and the data to tokenize and return ???
-    @:param tokenizer #TODO
+    preprocessing function that receives a tokenizer and the data to tokenize
+    @:param tokenizer 
     @:param data unprocessed data to tokenize
-    @:return res ???
+    @:return res 
     """
 
     def preproccess_function(self, data):
         if not self.tokenizer:
             raise Exception("need to define tokenizer")
-        res = self.tokenizer(data['sentence'], max_length=self.tokenizer.model_max_length,
-                             truncation=True)  # TODO check params
-
-        # if "label" in data: #TODO need to do this? idk
-        #     res["label"] = [(self.label_to_id[l] if l != -1 else -1) for l in
-        #                        data["label"]]
-
+        res = self.tokenizer(data['sentence'],
+                             max_length=self.tokenizer.model_max_length,
+                             truncation=True)
         return res
 
-    """
-    method that trainer will recieve ref to ??#TODO
-    """
 
     def compute_metrics(self, p: EvalPrediction):
-
         preds = p.predictions[0] if isinstance(p.predictions,
                                                tuple) else p.predictions
-        print(f"prediction 0: {preds}")
+
         preds = np.argmax(preds, axis=1)
-        result = self.eval_metric.compute(predictions=preds, references=p.label_ids)
+        result = self.eval_metric.compute(predictions=preds,
+                                          references=p.label_ids)
         if len(result) > 1:
             result["combined_score"] = np.mean(list(result.values())).item()
         return result
-        # if not self.eval_metric:
-        #     raise Exception("evaluation metric must be defined")
-        # preds = p.predictions[0] if isinstance(p.predictions,
-        #                                        tuple) else p.predictions
-        # preds = np.argmax(preds, axis=1)
-        # result = self.eval_metric.compute(predictions=preds, references=p.label_ids)[
-        #     "accuracy"]  # TODO bleu?
-        # return result
 
     def __train(self, model, training_args, train_split, eval_split, metric,
                 tokenizer, data_collator):
@@ -241,15 +250,22 @@ class FineTuner:
     this method returns predictions of the trained model on the test set. 
     """
 
-    def predict(self, file):
+    def predict(self):
         self.model.eval() #TODO should be self.trainer.eval()???
         predict_dataset = self.test_split.remove_columns("label")
-        with open(file, mode="w") as f:
+        predict_time = 0
+        with open("predictions.txt", mode="w") as f:
             for i in range(len(predict_dataset)):
                 sent = self.test_split["sentence"][i]
-                pred = self.trainer.predict(predict_dataset.select(range(i, i+1)),
-                                          metric_key_prefix="predict").predictions
-                f.write(f"{sent}###{pred}")
+                prediction = self.trainer.predict(predict_dataset.select(
+                    range(i, i+1)),
+                                          metric_key_prefix="predict")
+                predict_time += prediction.metrics["predict_runtime"]
+                ith_pred = np.argmax(prediction.predictions,
+                                                                 axis=1)
+                f.write(f"{sent}###{ith_pred[0]}\n")
+
+        return predict_time
 
 
 def mean_accuracy_on_seeds(trained_models_by_seed):
@@ -262,22 +278,24 @@ def std_accuracy_on_seeds(trained_models_by_seed):
     return np.std(accuracies)
 
 
-def write_res_file(trainer_dict):
+def write_res_file(trainer_dict, predict_time):
     with open("res.txt", mode="w") as f:
+        total_train_time = 0
         for model_name in trainer_dict.keys():
             metrics = trainer_dict[model_name]
             mean_accuracy = mean_accuracy_on_seeds(metrics)
             std_accuracy = std_accuracy_on_seeds(metrics)
-            f.write(f"{model_name},{mean_accuracy} +- {std_accuracy}")
-        f.write("----")
+            f.write(f"{model_name},{mean_accuracy} +- {std_accuracy}\n")
+            total_train_time = sum([model.get_train_time() for model
+                                    in trainer_dict[model_name]])
+        f.write("----\n")
+        f.write(f"train time,{total_train_time}\n")
+        f.write(f"predict time,{predict_time}\n")
+
 
 def write_predictions_file(best_model):
-    predictions_on_best_model = best_model.predict()
-    sentences = best_model.get_test()["sentence"] #TODO get sentences
-    with open("predictions.txt", mode="w", encoding="utf-8") as f:
-        for sent, pred in zip(sentences,predictions_on_best_model):
-            f.write(f"{sent}###{pred}")
-
+    predict_time = best_model.predict()
+    return predict_time
 
 
 def max_accuracy_for_model_keyfunc(metrics):
@@ -294,7 +312,8 @@ def predict_best_model(trainer_dict):
         best_model = key
     best_seed_on_winner_model = max(trainer_dict[best_model],
                                     key = lambda k: k.get_metrics()["eval_accuracy"])
-    write_predictions_file(best_seed_on_winner_model)
+    predict_res = write_predictions_file(best_seed_on_winner_model)
+    return predict_res
 
 
 
@@ -307,9 +326,9 @@ def main(model_names, seeds, dataset, train_samples, val_samples, test_samples):
                                   val_samples=val_samples, test_samples=test_samples)
             finetuner.run()
             trainers[model].append(finetuner)
+    predict_time = predict_best_model(trainers)
+    write_res_file(trainer_dict=trainers, predict_time=predict_time)
 
-        write_res_file(trainer_dict=trainers) #TODO move forward
-        predict_best_model(trainers)
 
 
 if __name__ == '__main__':
@@ -317,9 +336,9 @@ if __name__ == '__main__':
     model_names = ["bert-base-uncased", "roberta-base",
                    "google/electra-base-generator"]
     args = docopt(usage)
-
-    seeds = range(int(args["<num_seeds"]))
+    seeds = range(int(args["<num_seeds>"]))
     train_samples = int(args["<training_samples>"])
     val_samples = int(args["<val_samples>"])
     pred_samples = int(args["<pred_samples>"])
+
     main(model_names, seeds, "sst2", train_samples, val_samples, pred_samples)
