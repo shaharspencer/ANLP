@@ -3,6 +3,7 @@
 
 from collections import defaultdict
 
+import wandb
 # import wandb
 from docopt import docopt
 import numpy as np
@@ -13,6 +14,8 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel, Trainer, \
 from transformers import AutoModelForSequenceClassification
 # from transformers.integrations import WandbCallback
 # wandb.login(key="fbf0cfa343de1b7e8108fcab5c9fae9d72def7ea")
+
+wandb.init(mode='disabled')
 
 usage = '''
 ex1.py CLI.
@@ -59,6 +62,7 @@ class FineTuner:
         # if self.seed == 0:
         #     wandb.init(project=f"ANLP ex1 {splitted_for_wandb},
         #     seed {str(seed)}", entity='shahar-spencer')
+
 
     def get_labels(self):
         labels = self.train_split.features["label"].names
@@ -160,8 +164,7 @@ class FineTuner:
         configs = AutoConfig.from_pretrained(pretrained_model_name_or_path=model_name,
                                              num_labels = len(self.label_list),
                                             )#????
-        #
-        #TODO: need to define number of labels?
+
         return configs
 
     """
@@ -173,7 +176,7 @@ class FineTuner:
         return AutoModelForSequenceClassification.from_pretrained(
             pretrained_model_name_or_path=model_name,
             config=
-            config)  # TODO other args?
+            config)
 
     """
     loads tokenizer
@@ -251,7 +254,7 @@ class FineTuner:
     """
 
     def predict(self):
-        self.model.eval() #TODO should be self.trainer.eval()???
+        self.model.eval()
         predict_dataset = self.test_split.remove_columns("label")
         predict_time = 0
         with open("predictions.txt", mode="w") as f:
@@ -323,7 +326,8 @@ def main(model_names, seeds, dataset, train_samples, val_samples, test_samples):
         for seed in seeds:
             finetuner = FineTuner(model_name=model, dataset=dataset,
                                   seed=seed, train_samples=train_samples,
-                                  val_samples=val_samples, test_samples=test_samples)
+                                  val_samples=val_samples,
+                                  test_samples=test_samples)
             finetuner.run()
             trainers[model].append(finetuner)
     predict_time = predict_best_model(trainers)
