@@ -3,5 +3,5 @@ roberta-base,0.7415902140672784 +- 0.16876727325563115
 google/electra-base-generator,0.8971712538226301 +- 0.005486506152296366
 ----
 train time,20332.9852
-predict time,
+predict time,70
 

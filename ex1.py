@@ -3,7 +3,6 @@
 
 from collections import defaultdict
 
-import wandb
 # import wandb
 from docopt import docopt
 import numpy as np
@@ -14,8 +13,9 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel, Trainer, \
 from transformers import AutoModelForSequenceClassification
 # from transformers.integrations import WandbCallback
 # wandb.login(key="fbf0cfa343de1b7e8108fcab5c9fae9d72def7ea")
+import os
 
-wandb.init(mode='disabled')
+os.environ["WANDB_DISABLED"] = "true"
 
 usage = '''
 ex1.py CLI.
